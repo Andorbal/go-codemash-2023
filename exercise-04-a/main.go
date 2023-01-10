@@ -5,18 +5,17 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
+	"io"
 	"math"
 	"net/http"
-	"os"
 	"strconv"
-	"sync"
 )
 
-func createFrame(size int, offset int, palette color.Palette) *image.Paletted {
-	var scale = (size - 1) / 2
-	var img = image.NewPaletted(image.Rect(0, 0, size, size), palette)
+func createFrame(width int, height int, offset int, palette color.Palette) *image.Paletted {
+	var scale = (height - 1) / 2
+	var img = image.NewPaletted(image.Rect(0, 0, width, height), palette)
 
-	for i := 0; i < size; i += 1 {
+	for i := 0; i < width; i += 1 {
 		var sin = math.Sin(float64(i+offset)/100.0) * float64(scale)
 		var y = int(sin) + scale
 		img.SetColorIndex(i, y-1, 1)
@@ -27,9 +26,7 @@ func createFrame(size int, offset int, palette color.Palette) *image.Paletted {
 	return img
 }
 
-func buildGif(ch chan string, wg *sync.WaitGroup) {
-	var size = 1000
-
+func buildGif(w io.Writer, width int, height int, delay int, frames int, speed int) {
 	var palette = []color.Color{
 		color.RGBA{255, 255, 255, 255},
 		color.RGBA{255, 0, 0, 255},
@@ -37,32 +34,21 @@ func buildGif(ch chan string, wg *sync.WaitGroup) {
 
 	animation := gif.GIF{Delay: []int{}, Image: []*image.Paletted{}}
 
-	for i := 0; i < 1000; i += 1 {
-		animation.Image = append(animation.Image, createFrame(size, i, palette))
-		animation.Delay = append(animation.Delay, 5)
+	for i := 0; i < frames; i += 1 {
+		animation.Image = append(animation.Image, createFrame(width, height, i*speed, palette))
+		animation.Delay = append(animation.Delay, delay)
 	}
 
-	var filename string
-	filename = <-ch
-
-	f, err := os.Create(filename)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	gif.EncodeAll(f, &animation)
-
-	wg.Done()
+	gif.EncodeAll(w, &animation)
 }
 
-func getFilename(ch chan string, wg *sync.WaitGroup) {
-	fmt.Printf("Enter filename: ")
-	var filename string
-	fmt.Scanln(&filename)
+func getInt(val string, defaultValue int) int {
+	intval, err := strconv.Atoi(val)
+	if err != nil {
+		return defaultValue
+	}
 
-	ch <- filename
-
-	wg.Done()
+	return intval
 }
 
 func main() {
@@ -73,8 +59,19 @@ func main() {
 		fmt.Fprintf(w, "Sin of %v is %v", val, result)
 	})
 
+	http.HandleFunc("/gif", func(w http.ResponseWriter, r *http.Request) {
+		width := getInt(r.URL.Query().Get("width"), 1000)
+		height := getInt(r.URL.Query().Get("height"), 1000)
+		delay := getInt(r.URL.Query().Get("delay"), 5)
+		frames := getInt(r.URL.Query().Get("frames"), 1000)
+		speed := getInt(r.URL.Query().Get("speed"), 1)
+
+		w.Header().Add("Content-Type", "image/gif")
+		buildGif(w, width, height, delay, frames, speed)
+	})
+
 	port := ":3000"
-	fmt.Printf("[INFO] Server listening on port %v/n", port)
+	fmt.Printf("[INFO] Server listening on port %v", port)
 
 	http.ListenAndServe(port, nil)
 }
